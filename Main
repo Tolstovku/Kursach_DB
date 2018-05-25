@@ -1,0 +1,480 @@
+CREATE TYPE ВИД_МУЛЬТИПЛИКАЦИИ as enum ('Кукольная', 'Рисованная', 'Пластилиновая', 'Песочная');
+CREATE TYPE МАСШТАБИРУЕМОСТЬ as enum ('Векторная', 'Цифровая');
+CREATE TYPE МЕТОД_МОНТАЖА as enum ('Мелкоэлементный', 'Поэлементный', 'Блочный');
+CREATE TYPE ПРОРИСОВКА as enum ('Детальная', 'Набросок');
+CREATE TYPE ТИП_ДОРОЖКИ as enum ('Фон', 'Персонаж');
+CREATE TYPE ТИП_МОНТАЖА as enum ('Внутрикадровый', 'Межкадровый');
+
+CREATE TABLE МУЛЬТФИЛЬМ
+(
+  ИД_МУЛЬТФИЛЬМА       serial PRIMARY KEY,
+  НАЗВАНИЕ_МУЛЬТФИЛЬМА text   NOT NULL,
+  ДАТА_ВЫХОДА          date,
+  ОПИСАНИЕ             text,
+  БЮДЖЕТ               money,
+  ХРОНОМЕТРАЖ          time
+);
+
+CREATE TABLE ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА
+(
+  ИД_ЭТАПА       serial PRIMARY KEY,
+  ИД_МУЛЬТФИЛЬМА integer NOT NULL REFERENCES МУЛЬТФИЛЬМ ON DELETE CASCADE,
+  ИД_СЛЕД_ЭТАПА  integer DEFAULT NULL REFERENCES ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА,
+  ДАТА_СДАЧИ    date,
+  НАЗВАНИЕ_ЭТАПА varchar(20)
+
+);
+
+
+CREATE TABLE ДЕМОНСТРАЦИЯ
+(
+  ИД_РЕЦЕНЗИИ serial PRIMARY KEY,
+  ИД_ЭТАПА    integer NOT NULL REFERENCES ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА ON DELETE CASCADE,
+  РЕЙТИНГ     numeric(3),
+  ПЛОЩАДКА    text,
+  КОММЕНТАРИЙ text
+CONSTRAINT rating_CHECK CHECK ("РЕЙТИНГ" <= 10 and "РЕЙТИНГ" >= 0)
+);
+
+CREATE TABLE РАСКАДРОВКА
+(
+  ИД_СКЕТЧА        serial PRIMARY KEY,
+  ИД_ЭТАПА         integer NOT NULL REFERENCES ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА ON DELETE CASCADE,
+  МАСШТАБИРУЕМОСТЬ МАСШТАБИРУЕМОСТЬ,
+  ПРОРИСОВКА       ПРОРИСОВКА
+);
+
+CREATE TABLE АНИМАТИК
+(
+  ИД_АНИМАТИКА          serial PRIMARY KEY,
+  ИД_ЭТАПА             integer REFERENCES ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА ON DELETE CASCADE,
+  ВИД_МУЛЬТИПЛИКАЦИИ   ВИД_МУЛЬТИПЛИКАЦИИ,
+  КОЛИЧЕСТВО_ИЗМЕРЕНИЙ integer
+  CHECK(КОЛИЧЕСТВО_ИЗМЕРЕНИЙ = 2 OR КОЛИЧЕСТВО_ИЗМЕРЕНИЙ = 3)
+);
+
+CREATE TABLE МОНТАЖ
+(
+  ИД_СЦЕНЫ      serial PRIMARY KEY,
+  ИД_ЭТАПА      integer NOT NULL REFERENCES ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА ON DELETE CASCADE,
+  ТИП_МОНТАЖА   ТИП_МОНТАЖА,
+  МЕТОД_МОНТАЖА МЕТОД_МОНТАЖА
+);
+
+CREATE TABLE ПЕРСОНАЖИ
+(
+  ИД_ПЕРСОНАЖА serial PRIMARY KEY,
+  ИМЯ          text,
+  ВНЕШНОСТЬ    text,
+  ХАРАКТЕР     text,
+  ОДЕЖДА       text
+);
+
+CREATE TABLE ПОЯВЛЕНИЯ_В_МУЛЬТФИЛЬМАХ
+(
+  ИД_МУЛЬТФИЛЬМА integer REFERENCES ПЕРСОНАЖИ ON DELETE CASCADE,
+  ИД_ПЕРСОНАЖА   integer REFERENCES МУЛЬТФИЛЬМ ON DELETE CASCADE,
+  PRIMARY KEY (ИД_МУЛЬТФИЛЬМА, ИД_ПЕРСОНАЖА)
+);
+
+CREATE TABLE СОЗДАНИЕ_СЦЕНАРИЯ
+(
+  ИД_СЦЕНАРИЯ    serial PRIMARY KEY,
+  ИД_ЭТАПА       integer NOT NULL REFERENCES ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА ON DELETE CASCADE,
+  ОСНОВНОЙ_ЖАНР  text,
+  ТЕКСТ_СЦЕНАРИЯ text
+);
+
+CREATE TABLE ОЗВУЧИВАНИЕ
+(
+  ИД_ДОРОЖКИ   serial PRIMARY KEY,
+  ИД_ЭТАПА     integer NOT NULL REFERENCES ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА ON DELETE CASCADE,
+  ИД_ПЕРСОНАЖА integer REFERENCES ПЕРСОНАЖИ ON DELETE CASCADE,
+  ТИП_ДОРОЖКИ  ТИП_ДОРОЖКИ
+);
+
+CREATE TABLE ЛЮДИ
+(
+  ИД_ЧЕЛОВЕКА serial PRIMARY KEY,
+  ФАМИЛИЯ     text,
+  ИМЯ         text,
+  ОТЧЕСТВО    text
+);
+
+
+CREATE TABLE ЛЮДИ_ДЕМОНСТРАЦИЯ
+(
+  ИД_ЧЕЛОВЕКА integer REFERENCES ЛЮДИ ON DELETE CASCADE,
+  ИД_РЕЦЕНЗИИ integer REFERENCES ДЕМОНСТРАЦИЯ ON DELETE CASCADE,
+  PRIMARY KEY (ИД_РЕЦЕНЗИИ, ИД_ЧЕЛОВЕКА)
+);
+
+CREATE TABLE ЛЮДИ_РАСКАДРОВКА
+(
+  ИД_ЧЕЛОВЕКА integer REFERENCES ЛЮДИ ON DELETE CASCADE,
+  ИД_СКЕТЧА   integer REFERENCES РАСКАДРОВКА ON DELETE CASCADE,
+  PRIMARY KEY (ИД_ЧЕЛОВЕКА, ИД_СКЕТЧА)
+);
+CREATE TABLE ЛЮДИ_АНИМАТИК
+(
+  ИД_ЧЕЛОВЕКА  integer REFERENCES ЛЮДИ ON DELETE CASCADE,
+  ИД_АНИМАТИКА integer REFERENCES АНИМАТИК ON DELETE CASCADE,
+  PRIMARY KEY (ИД_ЧЕЛОВЕКА, ИД_АНИМАТИКА)
+);
+
+CREATE TABLE ЛЮДИ_МОНТАЖ
+(
+  ИД_ЧЕЛОВЕКА integer REFERENCES ЛЮДИ ON DELETE CASCADE,
+  ИД_СЦЕНЫ    integer REFERENCES МОНТАЖ ON DELETE CASCADE,
+  PRIMARY KEY (ИД_ЧЕЛОВЕКА, ИД_СЦЕНЫ)
+);
+
+CREATE TABLE ЛЮДИ_СЦЕНАРИЙ
+(
+  ИД_ЧЕЛОВЕКА integer REFERENCES ЛЮДИ ON DELETE CASCADE,
+  ИД_СЦЕНАРИЯ integer REFERENCES СОЗДАНИЕ_СЦЕНАРИЯ ON DELETE CASCADE,
+  PRIMARY KEY (ИД_ЧЕЛОВЕКА, ИД_СЦЕНАРИЯ)
+);
+
+CREATE TABLE ЛЮДИ_ОЗВУЧИВАНИЕ
+(
+  ИД_ЧЕЛОВЕКА integer REFERENCES ЛЮДИ ON DELETE CASCADE,
+  ИД_ДОРОЖКИ  integer REFERENCES ОЗВУЧИВАНИЕ ON DELETE CASCADE,
+  PRIMARY KEY (ИД_ЧЕЛОВЕКА, ИД_ДОРОЖКИ)
+);
+
+-- Функция проверки, чтобы дата сдачи всех этапов была раньше даты сдачи мультика
+
+CREATE FUNCTION trigger_stages_date_check() RETURNS TRIGGER AS $$
+BEGIN
+IF NOT (EXISTS (SELECT ИД_МУЛЬТФИЛЬМА FROM ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА WHERE ИД_МУЛЬТФИЛЬМА=NEW.ИД_МУЛЬТФИЛЬМА)) THEN RETURN NEW;
+END IF;
+IF NEW.ДАТА_СДАЧИ > (SELECT ДАТА_ВЫХОДА FROM МУЛЬТФИЛЬМ WHERE ИД_МУЛЬТФИЛЬМА=NEW.ИД_МУЛЬТФИЛЬМА) THEN RETURN NULL;
+END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE PLPGSQL;
+
+CREATE TRIGGER  t_my_date
+    BEFORE INSERT OR UPDATE ON "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА" FOR ROW
+    EXECUTE PROCEDURE trigger_stages_date_check();
+
+
+-- Функция, которая ставить добавленный этап в "Следующий этап" этапа с налом в этом поле.
+
+CREATE FUNCTION trigger_stages_ins() RETURNS TRIGGER AS $$
+DECLARE
+ifnull INTEGER;
+ifnotnull INTEGER;
+BEGIN
+IF NOT (EXISTS (SELECT ИД_МУЛЬТФИЛЬМА FROM ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА WHERE ИД_МУЛЬТФИЛЬМА=NEW.ИД_МУЛЬТФИЛЬМА)) THEN RETURN NULL;
+END IF;
+IF NEW."ИД_СЛЕД_ЭТАПА" IS NULL  THEN
+  SELECT "ИД_ЭТАПА" INTO ifnull FROM "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА" WHERE "ИД_МУЛЬТФИЛЬМА" = NEW."ИД_МУЛЬТФИЛЬМА" AND "ИД_СЛЕД_ЭТАПА" IS NULL AND "ИД_ЭТАПА"!=NEW."ИД_ЭТАПА";
+  UPDATE "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА" SET "ИД_СЛЕД_ЭТАПА" = NEW."ИД_ЭТАПА" WHERE "ИД_ЭТАПА" = ifnull;
+ELSE
+  SELECT "ИД_ЭТАПА" into ifnotnull FROM "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА" WHERE "ИД_МУЛЬТФИЛЬМА" = NEW."ИД_МУЛЬТФИЛЬМА" AND "ИД_СЛЕД_ЭТАПА" = NEW."ИД_СЛЕД_ЭТАПА";
+  UPDATE "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА" SET "ИД_СЛЕД_ЭТАПА" = NEW."ИД_ЭТАПА" WHERE "ИД_ЭТАПА" = ifnotnull ;
+
+END IF;
+  RETURN null;
+END;
+$$ LANGUAGE PLPGSQL;
+
+CREATE TRIGGER  t_my_ins
+    after INSERT ON "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА" FOR row
+    EXECUTE PROCEDURE trigger_stages_ins();
+
+
+--Хз что очевидно что-то с удалением
+CREATE FUNCTION trigger_stages_del() RETURNS trigger AS $$
+DECLARE
+ondelete INTEGER;
+BEGIN
+SELECT "ИД_ЭТАПА" INTO ondelete FROM "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА" WHERE "ИД_СЛЕД_ЭТАПА" = OLD."ИД_ЭТАПА";
+UPDATE "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА" SET "ИД_СЛЕД_ЭТАПА" = OLD."ИД_СЛЕД_ЭТАПА" WHERE "ИД_ЭТАПА" = ondelete ;
+  RETURN OLD;
+END;
+$$ LANGUAGE PLPGSQL;
+
+CREATE TRIGGER t_my_del
+		before DELETE ON "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА" FOR each row
+    EXECUTE PROCEDURE trigger_stages_del();
+/*
+CREATE FUNCTION trigger_stages_up() RETURNS trigger AS $$
+BEGIN
+    IF (OLD."ИД_МУЛЬТФИЛЬМА" IS DISTINCT FROM NEW."ИД_МУЛЬТФИЛЬМА") OR (OLD."ИД_СЛЕД_ЭТАПА" IS DISTINCT FROM  NEW."ИД_СЛЕД_ЭТАПА")
+      THEN
+      RAISE exception 'It is now allowed to update ИД_СЛЕД_ЭТАПА or ИД_МУЛЬТФИЛЬМА';
+      RETURN NULL;
+     END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE PLPGSQL;
+
+CREATE TRIGGER t_my_up
+		BEFORE UPDATE OF "ИД_МУЛЬТФИЛЬМА","ИД_СЛЕД_ЭТАПА" ON "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА" FOR EACH row
+    EXECUTE PROCEDURE trigger_stages_up();
+*/
+CREATE INDEX fk_id_etapa_demonstr ON ДЕМОНСТРАЦИЯ USING HASH(ИД_ЭТАПА);
+CREATE INDEX fk_id_etapa_kadr ON РАСКАДРОВКА USING HASH(ИД_ЭТАПА);
+CREATE INDEX fk_id_etapa_animatik ON АНИМАТИК USING HASH(ИД_ЭТАПА);
+CREATE INDEX fk_id_etapa_montage ON МОНТАЖ USING HASH(ИД_ЭТАПА);
+CREATE INDEX fk_id_etapa_scenario ON СОЗДАНИЕ_СЦЕНАРИЯ USING HASH(ИД_ЭТАПА);
+CREATE INDEX fk_id_etapa_sound ON ОЗВУЧИВАНИЕ USING HASH(ИД_ЭТАПА);
+CREATE INDEX fk_id_char_sound ON ОЗВУЧИВАНИЕ USING HASH(ИД_ПЕРСОНАЖА);
+CREATE INDEX fk_id_mult_stages ON ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА USING HASH(ИД_МУЛЬТФИЛЬМА);
+CREATE INDEX fk_id_next_etapa_stages ON ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА USING HASH(ИД_ЭТАПА); --:?
+
+
+CREATE INDEX mult_name ON МУЛЬТФИЛЬМ using hash(НАЗВАНИЕ_МУЛЬТФИЛЬМА);
+CREATE INDEX mult_date ON МУЛЬТФИЛЬМ using btree(ДАТА_ВЫХОДА);
+
+CREATE INDEX stage_deadline ON ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА USING BTREE(ДАТА_СДАЧИ);
+CREATE INDEX rating ON ДЕМОНСТРАЦИЯ USING BTREE(РЕЙТИНГ);
+
+CREATE INDEX char_name ON ПЕРСОНАЖИ USING hash(ИМЯ);
+
+CREATE INDEX person_name ON ЛЮДИ USING hash(ИМЯ);
+CREATE INDEX person_surname ON ЛЮДИ USING hash(ФАМИЛИЯ);
+
+
+-- Функция автозаполнения
+
+do $$
+declare
+  iter integer;
+  point integer;
+  names text[10];
+  dates date[10];
+  chrono time[10];
+  typesOf varchar(20)[6];
+  CharNames text[100];
+  OzvS integer[5000];
+  RasS integer[5000];
+  AnimS integer[5000];
+  SzenS integer[5000];
+  DemonS integer[5000];
+  MontS integer [5000];
+  OzvType text[2];
+  MashType text[2];
+  MontMeth text[3];
+  MontType text[2];
+  MultType text[4];
+  ProrisType text[2];
+
+begin
+  INSERT INTO МУЛЬТФИЛЬМ VALUES (DEFAULT, 'История из жизни:растроповорот', '1982-01-13', 'Despacito', 100, '00:59:06');
+  INSERT INTO МУЛЬТФИЛЬМ VALUES (DEFAULT, 'Смешарики', '1999-12-12', 'The best cartoon in the whole world', 30000000000, '04:59:59');
+  INSERT INTO МУЛЬТФИЛЬМ VALUES (DEFAULT, 'Нефтяные закрома', '1946-12-12', 'Мир маленького ребенка перевернулся когда он получил нефтяные вышки от дяди ', 250, '15:02:02');
+  INSERT INTO МУЛЬТФИЛЬМ VALUES (DEFAULT, 'JAVA cathedral', '1832-12-04', 'KOKKKKKKK', 500, '05:22:55');
+  INSERT INTO МУЛЬТФИЛЬМ VALUES (DEFAULT, 'GONgo', '2019-04-29', 'SUCH AN INTERESTING FILM', 500, '00:06:00');
+  INSERT INTO МУЛЬТФИЛЬМ VALUES (DEFAULT, 'Just like you', '2020-01-13', 'Im aware that Im an asshole', 250000, '00:03:06');
+  INSERT INTO МУЛЬТФИЛЬМ VALUES (DEFAULT, 'Новостной дайджест less than UNIVERSITET', '2007-01-01', 'Были обнаружены останки человека, умершего на другой планете за тысячу лет до его рождения,самый занятный факю,что не один из его потомков не уверен в своем существовании.Все это происходит за счет регулеряции на уровне мизантропов в крови волка.Волк дикое животное и именное по этому с обнаруженным существом произошли такие ужасные мутации,такие как: скалиоз,цистити тд.Все чот может произойти-произошло,так гласит народная мудрость в племенах ,живущих на дальних просторах бесконечности', 50000, '01:59:06');
+  INSERT INTO МУЛЬТФИЛЬМ VALUES (DEFAULT, 'Телепорт на тот свет', '2138-01-13', 'I want it', 25000, '00:45:08');
+  INSERT INTO МУЛЬТФИЛЬМ VALUES (DEFAULT, 'DoveMan', '1234-01-13', 'Новый superHero arrives завтра', 65451, '01:00:06');
+  INSERT INTO МУЛЬТФИЛЬМ VALUES (DEFAULT, 'Marimurtra', '1488-01-13', 'Интересные истории из дикого заповедника', 5165146, '10:59:59');
+  select ARRAY (select "НАЗВАНИЕ_МУЛЬТФИЛЬМА" from "МУЛЬТФИЛЬМ") into names;
+  select ARRAY (select "ДАТА_ВЫХОДА" from "МУЛЬТФИЛЬМ") into dates;
+  select ARRAY (select "ХРОНОМЕТРАЖ" from "МУЛЬТФИЛЬМ") into chrono;
+  typesOf = ARRAY ['создание сценария','раскадровка','аниматик','озвучивание','монтаж','демонстрация'];
+  CharNames = ARRAY ['Толстовку','Саня','Крош','Бараш','Михайлов','Кндершвайна','Евклидий','Стронций','JVM','Chris','LMAO','Dove','divan','Косеопея','Калимбругер','Пскуль','Корнишон','Малой','Корень','Привратий','Коломнич','Блекстар','Калина',
+                     'Пастух','Цитрон','Колумб','Слак','Кошка','АБДУЛАХМЕТ','ЛешаОмский','Лентраторий','Лунтик','Дронтер','Блоу','Крематорий','Кливлинд','Джоб','Дронтопед','ОлдСпайс','НьюСпайс','Гринвич','Гриндевальд','SvetoCopy','BMV','Трактор',
+                      'Элтех','Клава','Даша','Обух-Швец','Игла','БигБойФорЮ','Kenga','Крилл','Денис','Ксенурб','Костик','Шиша','Тоха','ДенисКирилл','Король','Тролль','Крестик','Огонь','Кнут','Труба','Вода','Лада','Трамп','Кочегар','Термостат','Кнут','Киевлянин'];
+
+FOR i IN 11..3000 loop  -- количество мультов
+  point = (i % 10)+1;
+  SELECT count("НАЗВАНИЕ_МУЛЬТФИЛЬМА") into iter from "МУЛЬТФИЛЬМ" Where "НАЗВАНИЕ_МУЛЬТФИЛЬМА" LIKE names[point]||'%';
+  iter = iter+1;
+  insert into "МУЛЬТФИЛЬМ" VALUES (DEFAULT,names[point]||' '||iter,dates[point]+(i*100),'Ненавязчивое продолжение фильма под названием '||names[point],i*1247,chrono[point]);
+  FOR j IN 1..6 loop     --по 6 этапов для каждого мульта
+    insert into "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА" VALUES (default,i,null,dates[point]-(j*45),typesOf[j]);
+
+  end loop;
+end loop;
+  iter = 1;   -- по 5к+ персов
+  FOR k in 1..72 loop
+    For f in 1..50 loop
+      iter = iter +1;
+      insert into "ПЕРСОНАЖИ" VALUES  (default,CharNames[k]||' '||CharNames[f],'Красивый','Бодрый','Модная');
+      insert into "ЛЮДИ" VALUES  (default,CharNames[iter-1],CharNames[k]||' '||CharNames[f],CharNames[iter-1]);
+
+    end loop;
+    iter = iter - 73;
+    end loop;
+
+
+  SELECT ARRAY(SELECT ИД_ЭТАПА FROM ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА WHERE НАЗВАНИЕ_ЭТАПА LIKE 'озвучивание')into OzvS;
+  SELECT ARRAY(SELECT ИД_ЭТАПА FROM ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА WHERE НАЗВАНИЕ_ЭТАПА LIKE 'раскадровка')into RasS;
+  SELECT ARRAY(SELECT ИД_ЭТАПА FROM ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА WHERE НАЗВАНИЕ_ЭТАПА LIKE 'аниматик')into AnimS;
+  SELECT ARRAY(SELECT ИД_ЭТАПА FROM ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА WHERE НАЗВАНИЕ_ЭТАПА LIKE 'демонстрация')into DemonS;
+  SELECT ARRAY(SELECT ИД_ЭТАПА FROM ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА WHERE НАЗВАНИЕ_ЭТАПА LIKE 'монтаж')into MontS;
+  SELECT ARRAY(SELECT ИД_ЭТАПА FROM ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА WHERE НАЗВАНИЕ_ЭТАПА LIKE 'создание сценария')into SzenS;
+  OzvType = ARRAY ['Фон','Персонаж'];
+  MashType = ARRAY ['Векторная','Цифровая'];
+  MontMeth = ARRAY ['Мелкоэлементный', 'Поэлементный', 'Блочный'];
+  MontType = ARRAY ['Внутрикадровый', 'Межкадровый'];
+  MultType = ARRAY ['Кукольная', 'Рисованная', 'Пластилиновая', 'Песочная'];
+  ProrisType = ARRAY ['Детальная', 'Набросок'];
+  FOR p in 1..2900 loop   -- в каждый этап
+    insert into ДЕМОНСТРАЦИЯ VALUES(default,DemonS[p],random()*10,'PLOsh','Comment' );
+    insert into РАСКАДРОВКА VALUES(default,RasS[p],MashType[random()*2 ]::МАСШТАБИРУЕМОСТЬ,ProrisType[random()*2 ]::ПРОРИСОВКА);
+    insert into АНИМАТИК VALUES(default,AnimS[p],MultType[random()*4]::ВИД_МУЛЬТИПЛИКАЦИИ,2 );
+    insert  into МОНТАЖ VALUES(default,MontS[p],MontType[random()*2]::ТИП_МОНТАЖА,MontMeth[random()*3]::МЕТОД_МОНТАЖА);
+    insert into СОЗДАНИЕ_СЦЕНАРИЯ VALUES(default,SzenS[p],'text','text');
+    insert into ОЗВУЧИВАНИЕ VALUES (default,OzvS[p],p/2+1 ,OzvType[random()*2 ]::ТИП_ДОРОЖКИ );
+
+    end loop;
+
+  FOR  l in 1..2800 loop  --ассоциации
+    INSERT INTO ЛЮДИ_СЦЕНАРИЙ VALUES (l,l);
+    INSERT INTO ЛЮДИ_АНИМАТИК VALUES (l,l);
+    INSERT INTO ЛЮДИ_РАСКАДРОВКА VALUES (l,l);
+    INSERT INTO ЛЮДИ_ДЕМОНСТРАЦИЯ VALUES (l,l);
+    INSERT INTO ЛЮДИ_МОНТАЖ VALUES (l,l);
+    INSERT INTO ЛЮДИ_ОЗВУЧИВАНИЕ VALUES (l,l);
+    INSERT INTO ПОЯВЛЕНИЯ_В_МУЛЬТФИЛЬМАХ VALUES (l,l);
+  end loop;
+
+end;
+$$;
+
+-- Запросы разные треш
+
+EXPLAIN ANALYZE SELECT ИД_МУЛЬТФИЛЬМА, РЕЙТИНГ
+FROM ДЕМОНСТРАЦИЯ JOIN ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА  USING (ИД_ЭТАПА);
+
+EXPLAIN ANALYZE SELECT НАЗВАНИЕ_МУЛЬТФИЛЬМА
+FROM МУЛЬТФИЛЬМ
+WHERE НАЗВАНИЕ_МУЛЬТФИЛЬМА='Смешарики'
+
+BEGIN;
+EXPLAIN ANALYZE INSERT INTO МУЛЬТФИЛЬМ VALUES (99999, 'История извыв жизни:растроповорот', '1982-01-13', 'Despacito', 100, '00:59:06');
+ROLLBACK;
+end;
+
+explain analyze SELECT ИД_АНИАТИКА
+FROM АНИМАТИК
+WHERE ВИД_МУЛЬТИПЛИКАЦИИ='Песочная'
+
+
+
+EXPLAIN ANALYZE SELECT ИД_ЭТАПА
+FROM ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА
+WHERE ДАТА_СДАЧИ between '1999-10-27' and '1999-12-03'
+
+
+
+EXPLAIN ANALYZE SELECT ТЕКСТ_СЦЕНАРИЯ
+FROM СОЗДАНИЕ_СЦЕНАРИЯ
+WHERE ТЕКСТ_СЦЕНАРИЯ='text'
+
+-- Индексы добавляем
+
+CREATE INDEX fk_id_etapa_demonstr ON ДЕМОНСТРАЦИЯ USING HASH(ИД_ЭТАПА);
+CREATE INDEX fk_id_etapa_kadr ON РАСКАДРОВКА USING HASH(ИД_ЭТАПА);
+CREATE INDEX fk_id_etapa_animatik ON АНИМАТИК USING HASH(ИД_ЭТАПА);
+CREATE INDEX fk_id_etapa_montage ON МОНТАЖ USING HASH(ИД_ЭТАПА);
+CREATE INDEX fk_id_etapa_scenario ON СОЗДАНИЕ_СЦЕНАРИЯ USING HASH(ИД_ЭТАПА);
+CREATE INDEX fk_id_etapa_sound ON ОЗВУЧИВАНИЕ USING HASH(ИД_ЭТАПА);
+CREATE INDEX fk_id_etapa_sound ON ОЗВУЧИВАНИЕ USING HASH(ИД_ЭТАПА);
+CREATE INDEX fk_id_char_sound ON ОЗВУЧИВАНИЕ USING HASH(ИД_ПЕРСОНАЖА);
+CREATE INDEX fk_id_mult_stages ON ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА USING HASH(ИД_МУЛЬТФИЛЬМА);
+CREATE INDEX fk_id_next_etapa_stages ON ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА USING HASH(ИД_ЭТАПА); --:?
+
+
+CREATE INDEX mult_name ON МУЛЬТФИЛЬМ using hash(НАЗВАНИЕ_МУЛЬТФИЛЬМА);
+CREATE INDEX mult_date ON МУЛЬТФИЛЬМ using btree(ДАТА_ВЫХОДА);
+
+CREATE INDEX stage_deadline ON ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА USING BTREE(ДАТА_СДАЧИ);
+CREATE INDEX rating ON ДЕМОНСТРАЦИЯ USING BTREE(РЕЙТИНГ);
+
+CREATE INDEX char_name ON ПЕРСОНАЖИ USING hash(ИМЯ);
+
+CREATE INDEX person_name ON ЛЮДИ USING hash(ИМЯ);
+CREATE INDEX person_surname ON ЛЮДИ USING hash(ФАМИЛИЯ);
+
+--CREATE INDEX anim on АНИМАТИК using (ВИД_МУЛЬТИПЛИКАЦИИ)
+
+
+
+--Функция, которая выводит все этапы для мульта в правильном порядке сверху вниз
+CREATE or replace FUNCTION get_stages(mult_name text)
+  returns TABLE(
+                ID_ЭТАПА integer,
+                ID_СЛЕД_ЭТАПА integer,
+                ИМЯ_ЭТАПА VARCHAR(30)
+               )
+               AS $$
+  BEGIN
+RETURN QUERY WITH RECURSIVE r AS (
+  SELECT "ИД_ЭТАПА","ИД_СЛЕД_ЭТАПА","НАЗВАНИЕ_ЭТАПА", 5 AS Порядок
+        from  МУЛЬТФИЛЬМ join "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА" using (ИД_МУЛЬТФИЛЬМА)
+              WHERE НАЗВАНИЕ_МУЛЬТФИЛЬМА=mult_name AND "ИД_СЛЕД_ЭТАПА" IS NULL
+
+    UNION ALL
+
+    -- рекурсивная часть
+    SELECT
+         "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА"."ИД_ЭТАПА","ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА"."ИД_СЛЕД_ЭТАПА","ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА"."НАЗВАНИЕ_ЭТАПА", r.Порядок - 1 AS Порядок
+   FROM "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА"
+      JOIN r
+          ON "ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА"."ИД_СЛЕД_ЭТАПА" = r."ИД_ЭТАПА"
+)
+SELECT "ИД_ЭТАПА", "ИД_СЛЕД_ЭТАПА", "НАЗВАНИЕ_ЭТАПА" FROM r order by Порядок;
+END;
+$$ LANGUAGE PLPGSQL;
+
+
+SELECT  * from get_stages('Новостной дайджест less than UNIVERSITET 3');
+
+
+
+
+
+--Функция, которая выводит всех людей, работающих над каким то мультом
+CREATE or replace FUNCTION get_people(mult_name text)
+  returns TABLE(
+                  ИД_Человека integer,
+                  Имя text,
+                  Фамилия text
+               )
+               AS $$
+  BEGIN
+RETURN QUERY
+select ЛЮДИ.ИД_ЧЕЛОВЕКА, ИМЯ, ФАМИЛИЯ
+from МУЛЬТФИЛЬМ JOIN ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА МУЛЬТФИЛЬМА USING (ИД_МУЛЬТФИЛЬМА)
+JOIN ДЕМОНСТРАЦИЯ using (ИД_ЭТАПА) JOIN ЛЮДИ_ДЕМОНСТРАЦИЯ using (ИД_РЕЦЕНЗИИ) JOIN ЛЮДИ on (ЛЮДИ_ДЕМОНСТРАЦИЯ.ИД_ЧЕЛОВЕКА=ЛЮДИ.ИД_ЧЕЛОВЕКА)
+WHERE НАЗВАНИЕ_МУЛЬТФИЛЬМА=mult_name
+UNION
+select ЛЮДИ.ИД_ЧЕЛОВЕКА, ИМЯ, ФАМИЛИЯ
+from МУЛЬТФИЛЬМ JOIN ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА МУЛЬТФИЛЬМА USING (ИД_МУЛЬТФИЛЬМА)
+JOIN РАСКАДРОВКА using (ИД_ЭТАПА) join ЛЮДИ_РАСКАДРОВКА using (ИД_СКЕТЧА) JOIN ЛЮДИ on (ЛЮДИ_РАСКАДРОВКА.ИД_ЧЕЛОВЕКА=ЛЮДИ.ИД_ЧЕЛОВЕКА)
+WHERE НАЗВАНИЕ_МУЛЬТФИЛЬМА=mult_name
+UNION
+select c.ИД_ЧЕЛОВЕКА, ИМЯ, ФАМИЛИЯ
+from МУЛЬТФИЛЬМ JOIN ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА МУЛЬТФИЛЬМА USING (ИД_МУЛЬТФИЛЬМА)
+JOIN МОНТАЖ using (ИД_ЭТАПА) join ЛЮДИ_МОНТАЖ using (ИД_СЦЕНЫ) JOIN ЛЮДИ c on (ЛЮДИ_МОНТАЖ.ИД_ЧЕЛОВЕКА=c.ИД_ЧЕЛОВЕКА)
+WHERE НАЗВАНИЕ_МУЛЬТФИЛЬМА=mult_name
+UNION
+select d.ИД_ЧЕЛОВЕКА, ИМЯ, ФАМИЛИЯ
+from МУЛЬТФИЛЬМ JOIN ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА МУЛЬТФИЛЬМА USING (ИД_МУЛЬТФИЛЬМА)
+JOIN СОЗДАНИЕ_СЦЕНАРИЯ USING (ИД_ЭТАПА) join ЛЮДИ_СЦЕНАРИЙ using (ИД_СЦЕНАРИЯ) join ЛЮДИ d on (ЛЮДИ_СЦЕНАРИЙ.ИД_ЧЕЛОВЕКА=d.ИД_ЧЕЛОВЕКА)
+WHERE НАЗВАНИЕ_МУЛЬТФИЛЬМА=mult_name
+UNION
+select e.ИД_ЧЕЛОВЕКА, ИМЯ, ФАМИЛИЯ
+from МУЛЬТФИЛЬМ JOIN ЭТАПЫ_СОЗДАНИЯ_МУЛЬТФИЛЬМА МУЛЬТФИЛЬМА USING (ИД_МУЛЬТФИЛЬМА)
+JOIN ОЗВУЧИВАНИЕ using (ИД_ЭТАПА) join ЛЮДИ_ОЗВУЧИВАНИЕ using (ИД_ДОРОЖКИ) JOIN ЛЮДИ e ON  (ЛЮДИ_ОЗВУЧИВАНИЕ.ИД_ЧЕЛОВЕКА = e.ИД_ЧЕЛОВЕКА)
+WHERE НАЗВАНИЕ_МУЛЬТФИЛЬМА=mult_name;
+
+END;
+$$ LANGUAGE PLPGSQL;
+
+--Запросы для теста
+
+select count(ИД_ЧЕЛОВЕКА) from ЛЮДИ_СЦЕНАРИЙ;
+
+select * from get_people('GONgo 3');
+
+
+select * from get_stages('Смешарики 10');
